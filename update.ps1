@@ -9,6 +9,9 @@ $aRef = $accountReference | ConvertFrom-Json;
 $success = $False;
 $auditMessage = "for person " + $p.DisplayName;
 
+# Get Primary Domain Controller
+$pdc = (Get-ADForest | Select-Object -ExpandProperty RootDomain | Get-ADDomain | Select-Object -Property PDCEmulator).PDCEmulator
+
 # Log Grade Level old and new
 Write-Verbose -Verbose "Previous Grade: $($pp.Custom.Grade)"
 Write-Verbose -Verbose "Current Grade: $($p.Custom.Grade)"
@@ -40,7 +43,7 @@ if($p.Custom.Grade -ne $null -and $pp.Custom.Grade -ne $null)
             $account = Get-ADUser -Identity $aRef;
             
             if(-Not($dryRun -eq $True)) {
-                Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $account.password -Force)
+                Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $account.password -Force) -Server $pdc
             }
             Write-Verbose -Verbose "password updated";
             $auditMessage = "password updated";
