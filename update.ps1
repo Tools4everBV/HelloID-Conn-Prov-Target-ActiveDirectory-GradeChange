@@ -1,80 +1,96 @@
 #Initialize default properties
 $c = $configuration | ConvertFrom-Json
-$p = $person | ConvertFrom-Json;
-$pp = $previousPerson | ConvertFrom-Json;
-$pd = $personDifferences | ConvertFrom-Json;
-$m = $manager | ConvertFrom-Json;
-$aRef = $accountReference | ConvertFrom-Json;
+$p = $person | ConvertFrom-Json
+$pp = $previousPerson | ConvertFrom-Json
+$pd = $personDifferences | ConvertFrom-Json
+$m = $manager | ConvertFrom-Json
+$aRef = $accountReference | ConvertFrom-Json
 
-$success = $False;
-$auditMessage = "for person " + $p.DisplayName;
+$success = $False
+$auditLogs = New-Object Collections.Generic.List[PSCustomObject]
 
 # Get Primary Domain Controller
 $pdc = (Get-ADForest | Select-Object -ExpandProperty RootDomain | Get-ADDomain | Select-Object -Property PDCEmulator).PDCEmulator
 
 # Log Grade Level old and new
-Write-Verbose -Verbose "Previous Grade: $($pp.Custom.Grade)"
-Write-Verbose -Verbose "Current Grade: $($p.Custom.Grade)"
+Write-Information "Previous Grade: $($pp.Custom.Grade)"
+Write-Information "Current Grade: $($p.Custom.Grade)"
 
 # Generate password based on grade level
-$lowerGrades = @("-2","-1","0","1","2","3");
+$lowerGrades = @("-2","-1","0","1","2","3")
 if($lowerGrades -contains ($p.Custom.Grade))
 {
-    $defaultPassword = "hello" + $p.Name.GivenName.ToLower();
+    $defaultPassword = "hello" + $p.Name.GivenName.ToLower()
 }
 else
 {
     $formattedDate = (Get-Date -Date $p.details.birthdate).ToUniversalTime().toString("MMddyyyy")
-    $defaultPassword = "$($p.Name.GivenName.substring(0,1).ToUpper())$($p.Name.FamilyName.substring(0,1).ToUpper())#$($formattedDate)";
+    $defaultPassword = "$($p.Name.GivenName.substring(0,1).ToUpper())$($p.Name.FamilyName.substring(0,1).ToUpper())#$($formattedDate)"
 }
-$account = @{ password = $defaultPassword };
-
 
 # Evaluate Grade Levels
-if($p.Custom.Grade -ne $null -and $pp.Custom.Grade -ne $null)
+if(-Not [string]::IsNullOrWhiteSpace($p.Custom.Grade) -AND -Not [string]::IsNullOrWhiteSpace($pp.Custom.Grade))
 {
     # Confirm Grade Level within Scope
-	if($p.Custom.Grade -eq '4' -and $pp.Custom.Grade -eq '3')
+    if($p.Custom.Grade -eq '4' -and $pp.Custom.Grade -eq '3')
     {
         # Execute Password Change
-		Write-Verbose -Verbose "Update Password";
+        Write-Information "Update Password"
         try
         {
-            $account = Get-ADUser -Identity $aRef;
+            $previousAccount = Get-ADUser -Identity $aRef
             
             if(-Not($dryRun -eq $True)) {
-                Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $account.password -Force) -Server $pdc
+                Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $defaultPassword -Force) -Server $pdc
+                $auditLogs.Add([PSCustomObject]@{
+                    # Action = "UpdateAccount" Optionally specify a different action for this audit log
+                    Message = "Account password updated for $($account.userName)"
+                    IsError = $False
+                })
             }
-            Write-Verbose -Verbose "password updated";
-            $auditMessage = "password updated";
-            $success = $true;
+            $account = Get-ADUser -Identity $aRef
+            Write-Information "Password updated"
+            $success = $True
         }
         catch
         {
-            $auditMessage = "$($_)";
+            $auditLogs.Add([PSCustomObject]@{
+                # Action = "UpdateAccount" Optionally specify a different action for this audit log
+                Message = "Account password failed to update for $($account.userName):  $_"
+                IsError = $True
+            })
         }
     }
     else
     {
-        Write-Verbose -Verbose "Skip Password Update (Grade)";
-        $auditMessage = "skipped for person (Grade)";
-        $success = $true;
+        Write-Information "Skip Password Update (Grade)"
+        # No audit entry as nothing changed.
+        $success = $True
     }
 }
 else
 {
-    Write-Verbose -Verbose "Skip Password Update (null values)";
-    $auditMessage = "skipped for person (null values)";
-    $success = $true;
+    Write-Information "Skip Password Update (null values)"
+    # No audit entry as nothing changed.
+    $success = $True
 }
 
 #build up result
 $result = [PSCustomObject]@{
-	Success= $success;
-	AccountReference= $aRef;
-	AuditDetails=$auditMessage;
-    Account = $account;
-};
+    Success = $success
+    AccountReference = $aRef
+    AuditLogs = $auditLogs
+    Account = $account
+    PreviousAccount = $previousAccount
+        
+    # Optionally update the data for use in other systems
+    <#
+    ExportData = [PSCustomObject]@{
+        displayName = $account.DisplayName
+        userName = $account.UserName
+    }
+    #>
+}
 
 #send result back
-Write-Output $result | ConvertTo-Json -Depth 10
+Write-Output ($result | ConvertTo-Json -Depth 10)
