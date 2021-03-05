@@ -1,4 +1,7 @@
 # HelloID-Conn-Prov-Target-ActiveDirectory-GradeChange
+<p align="center">
+  <img src="https://github.com/Tools4everBV/HelloID-Conn-Prov-Target-ActiveDirectory/blob/main/Assets/ActiveDirectoryLogo.png">
+</p>
 This is an example of changing the password for a user based on a grade level change. In this case, moving from 3rd grade to 4th grade.
 
 ## Table of Contents
