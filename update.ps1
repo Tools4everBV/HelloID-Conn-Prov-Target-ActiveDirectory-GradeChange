@@ -52,8 +52,6 @@ function New-RandomPassword($PasswordLength) {
         NewGrade = '4'
     }
     #endregion Grade Changes
-
-  
 #endregion Change mapping here
 
 #region Execute
@@ -73,8 +71,7 @@ function New-RandomPassword($PasswordLength) {
                 try{
                         #region Grade Change
                         if(-Not($dryRun -eq $True)) {
-                            
-                            Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $defaultPassword -Force) -Server $pdc
+                            Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $gradeChangeConfig.Password -Force) -Server $pdc
                                 $auditLogs.Add([PSCustomObject]@{
                                     Action = "UpdateAccount"
                                     Message = "Grade Change [$($pp.Custom.Grade)] to [$($p.Custom.Grade)] - Account password updated for $($previousAccount.userName)"
@@ -86,7 +83,7 @@ function New-RandomPassword($PasswordLength) {
                     $success = $false
                     $auditLogs.Add([PSCustomObject]@{
                         Action = "UpdateAccount"
-                        Message = "Error: Grade Change [$($pp.Custom.Grade)] to [$($p.Custom.Grade)] - Account password failed to update for $($previousAccount.userName)"
+                        Message = "Error: Grade Change [$($pp.Custom.Grade)] to [$($p.Custom.Grade)]: $($_)"
                         IsError = $true;
                     });
                     Write-Error $_
