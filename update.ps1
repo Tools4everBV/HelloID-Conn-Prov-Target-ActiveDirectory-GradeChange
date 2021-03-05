@@ -1,96 +1,115 @@
-#Initialize default properties
-$c = $configuration | ConvertFrom-Json
+#region Initialize default properties
+$config = ConvertFrom-Json $configuration
 $p = $person | ConvertFrom-Json
 $pp = $previousPerson | ConvertFrom-Json
 $pd = $personDifferences | ConvertFrom-Json
 $m = $manager | ConvertFrom-Json
-$aRef = $accountReference | ConvertFrom-Json
+$aRef = $accountReference | ConvertFrom-Json;
 
 $success = $False
-$auditLogs = New-Object Collections.Generic.List[PSCustomObject]
+$auditLogs = New-Object Collections.Generic.List[PSCustomObject];
 
-# Get Primary Domain Controller
 $pdc = (Get-ADForest | Select-Object -ExpandProperty RootDomain | Get-ADDomain | Select-Object -Property PDCEmulator).PDCEmulator
+#endregion Initialize default properties
 
-# Log Grade Level old and new
-Write-Information "Previous Grade: $($pp.Custom.Grade)"
-Write-Information "Current Grade: $($p.Custom.Grade)"
+#region Support Functions
+function New-RandomPassword($PasswordLength) {
+    if($PasswordLength -lt 8) { $PasswordLength = 8}
+        
+    # Used to store an array of characters that can be used for the password
+    $CharPool = New-Object System.Collections.ArrayList
 
-# Generate password based on grade level
-$lowerGrades = @("-2","-1","0","1","2","3")
-if($lowerGrades -contains ($p.Custom.Grade))
-{
-    $defaultPassword = "hello" + $p.Name.GivenName.ToLower()
+    # Add characters a-z to the arraylist
+    for ($index = 97; $index -le 122; $index++) { [Void]$CharPool.Add([char]$index) }
+
+    # Add characters A-Z to the arraylist
+    for ($index = 65; $index -le 90; $index++) { [Void]$CharPool.Add([Char]$index) }
+
+    # Add digits 0-9 to the arraylist
+    $CharPool.AddRange(@("0","1","2","3","4","5","6","7","8","9"))
+        
+    # Add a range of special characters to the arraylist
+    $CharPool.AddRange(@("!","""","#","$","%","&","'","(",")","*","+","-",".","/",":",";","<","=",">","?","@","[","\","]","^","_","{","|","}","~","!"))
+        
+    $password=""
+    $rand=New-Object System.Random
+        
+    # Generate password by appending a random value from the array list until desired length of password is reached
+    1..$PasswordLength | foreach { $password = $password + $CharPool[$rand.Next(0,$CharPool.Count)] }  
+        
+    $password
 }
-else
-{
-    $formattedDate = (Get-Date -Date $p.details.birthdate).ToUniversalTime().toString("MMddyyyy")
-    $defaultPassword = "$($p.Name.GivenName.substring(0,1).ToUpper())$($p.Name.FamilyName.substring(0,1).ToUpper())#$($formattedDate)"
-}
+#endregion Support Functions
 
-# Evaluate Grade Levels
-if(-Not [string]::IsNullOrWhiteSpace($p.Custom.Grade) -AND -Not [string]::IsNullOrWhiteSpace($pp.Custom.Grade))
-{
-    # Confirm Grade Level within Scope
-    if($p.Custom.Grade -eq '4' -and $pp.Custom.Grade -eq '3')
+#region Change mapping here
+    #region Grade Changes
+    $enableGradeChange = $false;
+
+    $gradeChangeConfig = @{
+        PasswordGroup = "PwdPolicyGroupName";
+        Password = New-RandomPassword(8);
+        OldGrade = '3'
+        NewGrade = '4'
+    }
+    #endregion Grade Changes
+#endregion Change mapping here
+
+#region Execute
+    #Get Current Account
+    $previousAccount = Get-ADUser -Identity $aRef -Server $pdc
+
+    #region Grade Change
+    if($enableGradeChange)
     {
-        # Execute Password Change
-        Write-Information "Update Password"
-        try
+        # Evaluate Grade Levels
+        if(-Not [string]::IsNullOrWhiteSpace($p.Custom.Grade) -AND -Not [string]::IsNullOrWhiteSpace($pp.Custom.Grade))
         {
-            $previousAccount = Get-ADUser -Identity $aRef
-            
-            if(-Not($dryRun -eq $True)) {
-                Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $defaultPassword -Force) -Server $pdc
-                $auditLogs.Add([PSCustomObject]@{
-                    # Action = "UpdateAccount" Optionally specify a different action for this audit log
-                    Message = "Account password updated for $($account.userName)"
-                    IsError = $False
-                })
+            # Confirm Grade Level within Scope
+            if($pp.Custom.Grade -eq $gradeChangeConfig.OldGrade -and $p.Custom.Grade -eq $gradeChangeConfig.NewGrade)
+            {
+                Write-Information "Processing Grade Change";
+                try{
+                        #region Grade Change
+                        if(-Not($dryRun -eq $True)) {
+                            Set-ADAccountPassword -Identity $aRef -Reset -NewPassword (ConvertTo-SecureString -AsPlainText $gradeChangeConfig.Password -Force) -Server $pdc
+                                $auditLogs.Add([PSCustomObject]@{
+                                    Action = "UpdateAccount"
+                                    Message = "Grade Change [$($pp.Custom.Grade)] to [$($p.Custom.Grade)] - Account password updated for $($previousAccount.userName)"
+                                    IsError = $False
+                                })
+                        }
+                        $success = $true
+                }catch{
+                    $success = $false
+                    $auditLogs.Add([PSCustomObject]@{
+                        Action = "UpdateAccount"
+                        Message = "Error: Grade Change [$($pp.Custom.Grade)] to [$($p.Custom.Grade)]: $($_)"
+                        IsError = $true;
+                    });
+                    Write-Error $_
+                }
             }
-            $account = Get-ADUser -Identity $aRef
-            Write-Information "Password updated"
-            $success = $True
-        }
-        catch
-        {
-            $auditLogs.Add([PSCustomObject]@{
-                # Action = "UpdateAccount" Optionally specify a different action for this audit log
-                Message = "Account password failed to update for $($account.userName):  $_"
-                IsError = $True
-            })
         }
     }
-    else
-    {
-        Write-Information "Skip Password Update (Grade)"
-        # No audit entry as nothing changed.
-        $success = $True
-    }
-}
-else
-{
-    Write-Information "Skip Password Update (null values)"
-    # No audit entry as nothing changed.
-    $success = $True
-}
+    #endregion Grade Change
 
-#build up result
+    #Get Updated Account
+    $updatedAccount = Get-ADUser -Identity $aRef -Server $pdc
+    
+#endregion Execute
+
+#region Build up result
 $result = [PSCustomObject]@{
     Success = $success
     AccountReference = $aRef
-    AuditLogs = $auditLogs
-    Account = $account
+    AuditLogs = $auditLogs;
+    Account = $updatedAccount
     PreviousAccount = $previousAccount
-        
-    # Optionally update the data for use in other systems
-    <#
-    ExportData = [PSCustomObject]@{
-        displayName = $account.DisplayName
-        userName = $account.UserName
-    }
-    #>
-}
-
-#send result back
+    
+    #ExportData = [PSCustomObject]@{
+    #    
+    #}
+};
+  
 Write-Output ($result | ConvertTo-Json -Depth 10)
+#endregion Build up result
