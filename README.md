@@ -25,3 +25,6 @@ This is an example of changing the password for a user based on a grade level ch
 ![image](https://github.com/Tools4everBV/HelloID-Conn-Prov-Target-ActiveDirectory/blob/main/Assets/config.png)
 
 _For more information about our HelloID PowerShell connectors, please refer to our general [Documentation](https://docs.helloid.com/hc/en-us/articles/360012557600-Configure-a-custom-PowerShell-source-system) page_
+
+# HelloID Docs
+The official HelloID documentation can be found at: https://docs.helloid.com/
